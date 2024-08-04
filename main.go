@@ -85,7 +85,7 @@ func getAllLoans(c *gin.Context) {
 		log.Fatal(err)
 	}
 
-	c.IndentedJSON(http.StatusOK, loans)
+	c.JSON(http.StatusOK, loans)
 }
 
 func getLoanByID(c *gin.Context) {
@@ -99,7 +99,7 @@ func getLoanByID(c *gin.Context) {
 	if err := db.QueryRow(queryString, id).Scan(&loan); err != nil {
 		switch err {
 		case sql.ErrNoRows:
-			c.IndentedJSON(http.StatusNotFound, "No loan with that ID exists")
+			c.JSON(http.StatusNotFound, "No loan with that ID exists")
 			return
 		default:
 			log.Fatal(err)
@@ -107,7 +107,7 @@ func getLoanByID(c *gin.Context) {
 
 	}
 
-	c.IndentedJSON(http.StatusOK, loan)
+	c.JSON(http.StatusOK, loan)
 
 }
 
