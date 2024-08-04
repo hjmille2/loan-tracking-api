@@ -88,6 +88,29 @@ func getAllLoans(c *gin.Context) {
 	c.IndentedJSON(http.StatusOK, loans)
 }
 
+func getLoanByID(c *gin.Context) {
+	id := c.Param("id")
+	c.Header("Content-Type", "application/json")
+
+	queryString := `SELECT loan_id, nickname, starting_amount, interest_rate, current_amount_owed, description FROM loan WHERE loan_id=$1`
+
+	var loan loan
+
+	if err := db.QueryRow(queryString, id).Scan(&loan); err != nil {
+		switch err {
+		case sql.ErrNoRows:
+			c.IndentedJSON(http.StatusNotFound, "No loan with that ID exists")
+			return
+		default:
+			log.Fatal(err)
+		}
+
+	}
+
+	c.IndentedJSON(http.StatusOK, loan)
+
+}
+
 func main() {
 	db = connectDB()
 
@@ -95,6 +118,7 @@ func main() {
 
 	//LOAN ROUTES
 	router.GET("/loans", getAllLoans)
+	router.GET("/loans/:id", getLoanByID)
 
 	//Open Connection
 	router.Run("localhost:8080")
