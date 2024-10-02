@@ -24,6 +24,12 @@ type loan struct {
 	Description         string  `json:"description"`
 }
 
+type loanUpdate struct {
+	Nickname      string  `json:"nickname"`
+	Interest_Rate float32 `json:"interest_rate"`
+	Description   string  `json:"description"`
+}
+
 type payment struct {
 	Payment_ID     int     `json:"payment_id"`
 	Loan_ID        int     `json:"loan_id"`
@@ -46,7 +52,6 @@ func connectDB() *sql.DB {
 	connStr := fmt.Sprintf("host=%s port=%s user=%s password=%s dbname=%s sslmode=disable",
 		getEnvVar("host"), getEnvVar("port"), getEnvVar("user"), getEnvVar("password"), getEnvVar("dbname"))
 
-	print(connStr)
 	db, err := sql.Open("postgres", connStr)
 
 	if err != nil {
@@ -92,14 +97,16 @@ func getLoanByID(c *gin.Context) {
 	id := c.Param("id")
 	c.Header("Content-Type", "application/json")
 
-	queryString := `SELECT loan_id, nickname, starting_amount, interest_rate, current_amount_owed, description FROM loan WHERE loan_id=$1`
+	queryString := `
+		SELECT loan_id, nickname, starting_amount, interest_rate, current_amount_owed, description FROM loan 
+		WHERE loan_id=$1`
 
 	var loan loan
 
 	if err := db.QueryRow(queryString, id).Scan(&loan); err != nil {
 		switch err {
 		case sql.ErrNoRows:
-			c.JSON(http.StatusNotFound, "No loan with that ID exists")
+			c.JSON(http.StatusNotFound, "No loan with that ID exists.")
 			return
 		default:
 			log.Fatal(err)
@@ -111,6 +118,29 @@ func getLoanByID(c *gin.Context) {
 
 }
 
+func createNewLoan(c *gin.Context) {
+	var newLoan loan
+	if err := c.BindJSON(&newLoan); err != nil {
+		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload."})
+		return
+	}
+
+	queryString := `
+		INSERT INTO loan (nickname, starting_amount, interest_rate, current_amount_owed, description) 
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING loan_id, nickname, starting_amount, interest_rate, current_amount_owed, description
+	`
+
+	var loanCreated loan
+
+	if err := db.QueryRow(queryString, newLoan.Nickname, newLoan.Starting_Amount, newLoan.Interest_Rate, newLoan.Current_Amount_Owed, newLoan.Description).Scan(
+		&loanCreated.Loan_ID, &loanCreated.Nickname, &loanCreated.Starting_Amount, &loanCreated.Interest_Rate, &loanCreated.Current_Amount_Owed, &loanCreated.Description); err != nil {
+		log.Fatal(err)
+	}
+
+	c.JSON(http.StatusCreated, loanCreated)
+}
+
 func main() {
 	db = connectDB()
 
@@ -119,6 +149,7 @@ func main() {
 	//LOAN ROUTES
 	router.GET("/loans", getAllLoans)
 	router.GET("/loans/:id", getLoanByID)
+	router.POST("/loans", createNewLoan)
 
 	//Open Connection
 	router.Run("localhost:8080")
