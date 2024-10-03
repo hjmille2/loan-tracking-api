@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"reflect"
@@ -113,7 +114,7 @@ func getLoanByID(c *gin.Context) {
 
 	var loan loan
 
-	if err := db.QueryRow(queryString, id).Scan(&loan); err != nil {
+	if err := db.QueryRow(queryString, id).Scan(&loan.Loan_ID, &loan.Nickname, &loan.Starting_Amount, &loan.Interest_Rate, &loan.Current_Amount_Owed, &loan.Description); err != nil {
 		switch err {
 		case sql.ErrNoRows:
 			c.JSON(http.StatusNotFound, "No loan with that ID exists.")
@@ -200,6 +201,32 @@ func updateLoanByID(c *gin.Context) {
 	c.JSON(http.StatusOK, updatedLoan)
 }
 
+// this will delete all rows in payments that have this loan id as foreign key
+// along with deleting in the loan table
+// it is irreversible
+func deleteLoanDataByID(c *gin.Context) {
+	c.Header("Content-Type", "application/json")
+	id := c.Param("id")
+
+	deleteFromPaymentQueryString := `DELETE FROM payment WHERE loan_id=$1`
+	deleteFromLoanQueryString := `DELETE FROM loan WHERE loan_id=$1`
+
+	if _, err := db.Exec(deleteFromPaymentQueryString, id); err != nil {
+		slog.Error(err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{"errors": err})
+		return
+	}
+
+	if _, err := db.Exec(deleteFromLoanQueryString, id); err != nil {
+		slog.Error(err.Error())
+		c.JSON(http.StatusBadRequest, gin.H{"errors": err})
+		return
+	}
+
+	c.JSON(http.StatusOK, "Successfully deleted loan with id "+id)
+
+}
+
 // case statement to return human readable errors
 func retErrorStr(tag string) string {
 	switch tag {
@@ -233,6 +260,7 @@ func main() {
 
 	router.GET("/loans/:id", getLoanByID)
 	router.PATCH("/loans/:id", updateLoanByID)
+	router.DELETE("/loans/:id", deleteLoanDataByID)
 
 	//Open Connection
 	router.Run("localhost:8080")
