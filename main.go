@@ -30,9 +30,9 @@ type loan struct {
 }
 
 type loanUpdate struct {
-	Nickname      string  `json:"nickname"`
-	Interest_Rate float32 `json:"interest_rate"`
-	Description   string  `json:"description"`
+	Nickname      string  `json:"nickname" binding:"required"`
+	Interest_Rate float32 `json:"interest_rate" binding:"required"`
+	Description   string  `json:"description" binding:"required"`
 }
 
 type payment struct {
@@ -130,8 +130,10 @@ func getLoanByID(c *gin.Context) {
 
 func createNewLoan(c *gin.Context) {
 	var newLoan loan
+
+	//make sure response is json
 	c.Header("Content-Type", "application/json")
-	//ensure json input if not, return 400
+	//error handling, make sure it aligns with the bindings of the struct and is valid json input
 	if err := c.ShouldBindBodyWithJSON(&newLoan); err != nil {
 		var validator validator.ValidationErrors
 		if errors.As(err, &validator) {
@@ -145,22 +147,60 @@ func createNewLoan(c *gin.Context) {
 		}
 	}
 
+	//query to insert in, added returning as i want to retun these values to our uses to reduce the amount of querying
 	queryString := `
 		INSERT INTO loan (nickname, starting_amount, interest_rate, current_amount_owed, description) 
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING loan_id, nickname, starting_amount, interest_rate, current_amount_owed, description
 	`
-
 	var loanCreated loan
-
 	if err := db.QueryRow(queryString, newLoan.Nickname, newLoan.Starting_Amount, newLoan.Interest_Rate, newLoan.Current_Amount_Owed, newLoan.Description).Scan(
 		&loanCreated.Loan_ID, &loanCreated.Nickname, &loanCreated.Starting_Amount, &loanCreated.Interest_Rate, &loanCreated.Current_Amount_Owed, &loanCreated.Description); err != nil {
-		log.Fatal(err)
+		c.JSON(http.StatusBadRequest, gin.H{"errors": err})
+		return
 	}
 
 	c.JSON(http.StatusCreated, loanCreated)
 }
 
+func updateLoanByID(c *gin.Context) {
+	c.Header("Content-Type", "application/json")
+	id := c.Param("id")
+	var loanUpdate loanUpdate
+	//check that input is valid
+	if err := c.ShouldBindBodyWithJSON(&loanUpdate); err != nil {
+		var validator validator.ValidationErrors
+		if errors.As(err, &validator) {
+			errorOutput := make([]ErrorMessage, len(validator))
+			for i, indivErr := range validator {
+				errorOutput[i] = ErrorMessage{indivErr.Field(), retErrorStr(indivErr.Tag())}
+			}
+
+			c.JSON(http.StatusBadRequest, gin.H{"errors": errorOutput})
+			return
+		}
+	}
+
+	queryString := `
+		UPDATE loan
+		SET
+			nickname = $1,
+			interest_rate = $2,
+			description = $3
+		WHERE loan_id = $4
+		RETURNING loan_id, nickname, starting_amount, interest_rate, current_amount_owed, description
+	`
+	var updatedLoan loan
+	if err := db.QueryRow(queryString, loanUpdate.Nickname, loanUpdate.Interest_Rate, loanUpdate.Description, id).Scan(
+		&updatedLoan.Loan_ID, &updatedLoan.Nickname, &updatedLoan.Starting_Amount, &updatedLoan.Interest_Rate, &updatedLoan.Current_Amount_Owed, &updatedLoan.Description); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"errors": err})
+		return
+	}
+
+	c.JSON(http.StatusOK, updatedLoan)
+}
+
+// case statement to return human readable errors
 func retErrorStr(tag string) string {
 	switch tag {
 	case "required":
@@ -168,7 +208,7 @@ func retErrorStr(tag string) string {
 
 	}
 
-	return "Error"
+	return "Unknown Error"
 }
 
 func main() {
@@ -192,6 +232,7 @@ func main() {
 	router.POST("/loans", createNewLoan)
 
 	router.GET("/loans/:id", getLoanByID)
+	router.PATCH("/loans/:id", updateLoanByID)
 
 	//Open Connection
 	router.Run("localhost:8080")
