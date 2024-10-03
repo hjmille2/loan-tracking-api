@@ -2,12 +2,17 @@ package main
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
+	"reflect"
+	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin/binding"
+	"github.com/go-playground/validator/v10"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
@@ -17,10 +22,10 @@ var db *sql.DB
 
 type loan struct {
 	Loan_ID             int     `json:"loan_id"`
-	Nickname            string  `json:"nickname"`
-	Starting_Amount     float64 `json:"starting_amount"`
-	Interest_Rate       float32 `json:"interest_rate"`
-	Current_Amount_Owed float64 `json:"current_amount_owed"`
+	Nickname            string  `json:"nickname" binding:"required"`
+	Starting_Amount     float64 `json:"starting_amount" binding:"required"`
+	Interest_Rate       float32 `json:"interest_rate" binding:"required"`
+	Current_Amount_Owed float64 `json:"current_amount_owed" binding:"required"`
 	Description         string  `json:"description"`
 }
 
@@ -36,6 +41,11 @@ type payment struct {
 	Payment_Date   string  `json:"payment_date"`
 	Principal_Paid float32 `json:"principal_paid"`
 	Interest_Paid  float32 `json:"interest_paid"`
+}
+
+type ErrorMessage struct {
+	Field   string
+	Message string
 }
 
 func getEnvVar(key string) string {
@@ -120,9 +130,19 @@ func getLoanByID(c *gin.Context) {
 
 func createNewLoan(c *gin.Context) {
 	var newLoan loan
-	if err := c.BindJSON(&newLoan); err != nil {
-		c.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"error": "Invalid request payload."})
-		return
+	c.Header("Content-Type", "application/json")
+	//ensure json input if not, return 400
+	if err := c.ShouldBindBodyWithJSON(&newLoan); err != nil {
+		var validator validator.ValidationErrors
+		if errors.As(err, &validator) {
+			errorOutput := make([]ErrorMessage, len(validator))
+			for i, indivErr := range validator {
+				errorOutput[i] = ErrorMessage{indivErr.Field(), retErrorStr(indivErr.Tag())}
+			}
+
+			c.JSON(http.StatusBadRequest, gin.H{"errors": errorOutput})
+			return
+		}
 	}
 
 	queryString := `
@@ -141,15 +161,37 @@ func createNewLoan(c *gin.Context) {
 	c.JSON(http.StatusCreated, loanCreated)
 }
 
+func retErrorStr(tag string) string {
+	switch tag {
+	case "required":
+		return "This field is required."
+
+	}
+
+	return "Error"
+}
+
 func main() {
 	db = connectDB()
 
 	router := gin.Default()
 
+	//use json rather than struct field name
+	if v, ok := binding.Validator.Engine().(*validator.Validate); ok {
+		v.RegisterTagNameFunc(func(fld reflect.StructField) string {
+			name := strings.SplitN(fld.Tag.Get("json"), ",", 2)[0]
+			if name == "-" {
+				return ""
+			}
+			return name
+		})
+	}
+
 	//LOAN ROUTES
 	router.GET("/loans", getAllLoans)
-	router.GET("/loans/:id", getLoanByID)
 	router.POST("/loans", createNewLoan)
+
+	router.GET("/loans/:id", getLoanByID)
 
 	//Open Connection
 	router.Run("localhost:8080")
