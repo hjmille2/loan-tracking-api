@@ -38,10 +38,9 @@ type loanUpdate struct {
 
 type payment struct {
 	Payment_ID     int     `json:"payment_id"`
-	Loan_ID        int     `json:"loan_id"`
-	Payment_Date   string  `json:"payment_date"`
-	Principal_Paid float32 `json:"principal_paid"`
-	Interest_Paid  float32 `json:"interest_paid"`
+	Payment_Date   string  `json:"payment_date" binding:"required"`
+	Principal_Paid float32 `json:"principal_paid" binding:"required"`
+	Interest_Paid  float32 `json:"interest_paid" binding:"required"`
 }
 
 type ErrorMessage struct {
@@ -227,6 +226,40 @@ func deleteLoanDataByID(c *gin.Context) {
 
 }
 
+func createNewPayment(c *gin.Context) {
+	c.Header("Content-Type", "application/json")
+	var newPayment payment
+	loanId := c.Param("loanId")
+
+	if err := c.ShouldBindBodyWithJSON(&newPayment); err != nil {
+		var validator validator.ValidationErrors
+		if errors.As(err, &validator) {
+			errorOutput := make([]ErrorMessage, len(validator))
+			for i, indivErr := range validator {
+				errorOutput[i] = ErrorMessage{indivErr.Field(), retErrorStr(indivErr.Tag())}
+			}
+
+			c.JSON(http.StatusBadRequest, gin.H{"errors": errorOutput})
+			return
+		}
+	}
+
+	queryString := `
+		INSERT INTO payment (loan_id, payment_date, principal_paid, interest_paid)
+		VALUES ($1, $2, $3, $4)
+		RETURNING payment_id, payment_date, principal_paid, interest_paid
+	`
+
+	var paymentCreated payment
+	if err := db.QueryRow(queryString, loanId, newPayment.Payment_Date, newPayment.Principal_Paid, newPayment.Interest_Paid).Scan(
+		&paymentCreated.Payment_ID, &paymentCreated.Payment_Date, &paymentCreated.Principal_Paid, &paymentCreated.Interest_Paid); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"errors": err})
+		return
+	}
+
+	c.JSON(http.StatusCreated, paymentCreated)
+}
+
 // case statement to return human readable errors
 func retErrorStr(tag string) string {
 	switch tag {
@@ -261,6 +294,9 @@ func main() {
 	router.GET("/loans/:id", getLoanByID)
 	router.PATCH("/loans/:id", updateLoanByID)
 	router.DELETE("/loans/:id", deleteLoanDataByID)
+
+	//PAYMENT ROUTES
+	router.POST("/loans/:loanId/payments", createNewPayment)
 
 	//Open Connection
 	router.Run("localhost:8080")
