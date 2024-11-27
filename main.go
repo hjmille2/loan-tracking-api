@@ -104,7 +104,7 @@ func getAllLoans(c *gin.Context) {
 }
 
 func getLoanByID(c *gin.Context) {
-	id := c.Param("id")
+	id := c.Param("loanId")
 	c.Header("Content-Type", "application/json")
 
 	queryString := `
@@ -119,7 +119,7 @@ func getLoanByID(c *gin.Context) {
 			c.JSON(http.StatusNotFound, "No loan with that ID exists.")
 			return
 		default:
-			log.Fatal(err)
+			c.JSON(http.StatusBadRequest, gin.H{"errors": err})
 		}
 
 	}
@@ -165,7 +165,7 @@ func createNewLoan(c *gin.Context) {
 
 func updateLoanByID(c *gin.Context) {
 	c.Header("Content-Type", "application/json")
-	id := c.Param("id")
+	id := c.Param("loanId")
 	var loanUpdate loanUpdate
 	//check that input is valid
 	if err := c.ShouldBindBodyWithJSON(&loanUpdate); err != nil {
@@ -205,7 +205,7 @@ func updateLoanByID(c *gin.Context) {
 // it is irreversible
 func deleteLoanDataByID(c *gin.Context) {
 	c.Header("Content-Type", "application/json")
-	id := c.Param("id")
+	id := c.Param("loanId")
 
 	deleteFromPaymentQueryString := `DELETE FROM payment WHERE loan_id=$1`
 	deleteFromLoanQueryString := `DELETE FROM loan WHERE loan_id=$1`
@@ -260,6 +260,38 @@ func createNewPayment(c *gin.Context) {
 	c.JSON(http.StatusCreated, paymentCreated)
 }
 
+func getAllPaymentsByLoanID(c *gin.Context) {
+	c.Header("Content-Type", "application/json")
+	payments := []payment{}
+	loanId := c.Param("loanId")
+
+	queryString := `
+		SELECT payment_id, payment_date, principal_paid, interest_paid
+		FROM payment
+		WHERE loan_id=$1
+	`
+
+	rows, err := db.Query(queryString, loanId)
+
+	defer rows.Close()
+
+	for rows.Next() {
+		var p payment
+		err := rows.Scan(&p.Payment_ID, &p.Payment_Date, &p.Principal_Paid, &p.Interest_Paid)
+		if err != nil {
+			log.Fatal(err)
+		}
+		payments = append(payments, p)
+	}
+
+	err = rows.Err()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	c.JSON(http.StatusOK, payments)
+}
+
 // case statement to return human readable errors
 func retErrorStr(tag string) string {
 	switch tag {
@@ -273,6 +305,7 @@ func retErrorStr(tag string) string {
 
 func main() {
 	db = connectDB()
+	defer db.Close()
 
 	router := gin.Default()
 
@@ -291,15 +324,15 @@ func main() {
 	router.GET("/loans", getAllLoans)
 	router.POST("/loans", createNewLoan)
 
-	router.GET("/loans/:id", getLoanByID)
-	router.PATCH("/loans/:id", updateLoanByID)
-	router.DELETE("/loans/:id", deleteLoanDataByID)
+	router.GET("/loans/:loanId", getLoanByID)
+	router.PATCH("/loans/:loanId", updateLoanByID)
+	router.DELETE("/loans/:loanId", deleteLoanDataByID)
 
 	//PAYMENT ROUTES
 	router.POST("/loans/:loanId/payments", createNewPayment)
+	router.GET("/loans/:loanId/payments", getAllPaymentsByLoanID)
 
 	//Open Connection
 	router.Run("localhost:8080")
 
-	defer db.Close()
 }
