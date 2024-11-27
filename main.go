@@ -272,6 +272,9 @@ func getAllPaymentsByLoanID(c *gin.Context) {
 	`
 
 	rows, err := db.Query(queryString, loanId)
+	if err != nil {
+		log.Fatal(err)
+	}
 
 	defer rows.Close()
 
