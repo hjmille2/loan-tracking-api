@@ -39,8 +39,8 @@ type loanUpdate struct {
 type payment struct {
 	Payment_ID     int     `json:"payment_id"`
 	Payment_Date   string  `json:"payment_date" binding:"required"`
-	Principal_Paid float32 `json:"principal_paid" binding:"required"`
-	Interest_Paid  float32 `json:"interest_paid" binding:"required"`
+	Principal_Paid float32 `json:"principal_paid" binding:"required,gte=0"`
+	Interest_Paid  float32 `json:"interest_paid" binding:"gte=0"`
 }
 
 type ErrorMessage struct {
@@ -231,7 +231,7 @@ func createNewPayment(c *gin.Context) {
 	var newPayment payment
 	loanId := c.Param("loanId")
 
-	if err := c.ShouldBindBodyWithJSON(&newPayment); err != nil {
+	if err := c.ShouldBindJSON(&newPayment); err != nil {
 		var validator validator.ValidationErrors
 		if errors.As(err, &validator) {
 			errorOutput := make([]ErrorMessage, len(validator))
@@ -244,14 +244,14 @@ func createNewPayment(c *gin.Context) {
 		}
 	}
 
-	queryString := `
+	queryStringPaymentCreation := `
 		INSERT INTO payment (loan_id, payment_date, principal_paid, interest_paid)
 		VALUES ($1, $2, $3, $4)
 		RETURNING payment_id, payment_date, principal_paid, interest_paid
 	`
 
 	var paymentCreated payment
-	if err := db.QueryRow(queryString, loanId, newPayment.Payment_Date, newPayment.Principal_Paid, newPayment.Interest_Paid).Scan(
+	if err := db.QueryRow(queryStringPaymentCreation, loanId, newPayment.Payment_Date, newPayment.Principal_Paid, newPayment.Interest_Paid).Scan(
 		&paymentCreated.Payment_ID, &paymentCreated.Payment_Date, &paymentCreated.Principal_Paid, &paymentCreated.Interest_Paid); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"errors": err})
 		return
@@ -295,15 +295,55 @@ func getAllPaymentsByLoanID(c *gin.Context) {
 	c.JSON(http.StatusOK, payments)
 }
 
+func updatePaymentByID(c *gin.Context) {
+	c.Header("Content-Type", "application/json")
+	loanId := c.Param("loanId")
+	paymentId := c.Param("paymentId")
+	var paymentUpdate payment
+
+	if err := c.ShouldBindJSON(&paymentUpdate); err != nil {
+		var validator validator.ValidationErrors
+		if errors.As(err, &validator) {
+			errorOutput := make([]ErrorMessage, len(validator))
+			for i, indivErr := range validator {
+				errorOutput[i] = ErrorMessage{indivErr.Field(), retErrorStr(indivErr.Tag())}
+			}
+
+			c.JSON(http.StatusBadRequest, gin.H{"errors": errorOutput})
+			return
+		}
+	}
+
+	queryStringPaymentUpdate := `
+		UPDATE payment
+		SET
+			payment_date = $1,
+			principal_paid = $2,
+			interest_paid = $3
+		WHERE payment_id = $4 AND loan_id = $5
+		RETURNING payment_id, payment_date, principal_paid, interest_paid
+	`
+
+	var updatedPayment payment
+	if err := db.QueryRow(queryStringPaymentUpdate, paymentUpdate.Payment_Date, paymentUpdate.Principal_Paid, paymentUpdate.Interest_Paid, paymentId, loanId).Scan(
+		&updatedPayment.Payment_ID, &updatedPayment.Payment_Date, &updatedPayment.Principal_Paid, &updatedPayment.Interest_Paid); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"errors": err})
+		return
+	}
+
+	c.JSON(http.StatusOK, updatedPayment)
+}
+
 // case statement to return human readable errors
 func retErrorStr(tag string) string {
 	switch tag {
 	case "required":
 		return "This field is required."
-
+	case "gte":
+		return "This field must be greater than or equal to 0."
+	default:
+		return "Unknown error."
 	}
-
-	return "Unknown Error"
 }
 
 func main() {
@@ -334,6 +374,7 @@ func main() {
 	//PAYMENT ROUTES
 	router.POST("/loans/:loanId/payments", createNewPayment)
 	router.GET("/loans/:loanId/payments", getAllPaymentsByLoanID)
+	router.PATCH("/loans/:loanId/payments/:paymentId", updatePaymentByID)
 
 	//Open Connection
 	router.Run("localhost:8080")
