@@ -334,6 +334,21 @@ func updatePaymentByID(c *gin.Context) {
 	c.JSON(http.StatusOK, updatedPayment)
 }
 
+func deletePaymentByID(c *gin.Context) {
+	c.Header("Content-Type", "application/json")
+	loanId := c.Param("loanId")
+	paymentId := c.Param("paymentId")
+
+	queryString := `DELETE FROM payment WHERE payment_id=$1 AND loan_id=$2`
+
+	if _, err := db.Exec(queryString, paymentId, loanId); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"errors": err})
+		return
+	}
+
+	c.JSON(http.StatusOK, "Successfully deleted payment with id "+paymentId)
+}
+
 // case statement to return human readable errors
 func retErrorStr(tag string) string {
 	switch tag {
@@ -375,6 +390,7 @@ func main() {
 	router.POST("/loans/:loanId/payments", createNewPayment)
 	router.GET("/loans/:loanId/payments", getAllPaymentsByLoanID)
 	router.PATCH("/loans/:loanId/payments/:paymentId", updatePaymentByID)
+	router.DELETE("/loans/:loanId/payments/:paymentId", deletePaymentByID)
 
 	//Open Connection
 	router.Run("localhost:8080")
